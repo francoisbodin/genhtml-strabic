@@ -535,6 +535,14 @@ int genhtml_setpagewidth(lua_State *L){
   return 0; 
 }
 
+//set page height
+//list of constant used for generating the HTML file
+int genhtml_setpageheight(lua_State *L){
+  int h = luaL_checkinteger(L,1); // get the first argument
+  pageContext.sizeY = h;
+  return 0; 
+}
+
 int genhtml_start(lua_State *L){
   printf("Opening output file\n");
   if (outfile == NULL){
@@ -566,10 +574,12 @@ int genhtml_finish(lua_State *L){
     if (!nprologue) printf("Prologue node not found\n");
     xmlChar *content = nodeGetContent(nprologue);
     if (content){
-      char str[LEN];
+      char w[LEN];
+			char h[LEN];
       // first parameter is the width in px
-      snprintf(str, LEN, "%d", pageContext.sizeX);
-      fprintf(outfile,"%s\n",insertParam(content,4,str,STR_DEFAULTPOLICE,STR_DEFAULTCOLOR,STR_DEFAULTBACKGROUNDCOLOR));
+      snprintf(w, LEN, "%d", pageContext.sizeX);
+			snprintf(h, LEN, "%d", pageContext.sizeY);
+      fprintf(outfile,"%s\n",insertParam(content,5,w,h,STR_DEFAULTPOLICE,STR_DEFAULTCOLOR,STR_DEFAULTBACKGROUNDCOLOR));
     }
     //body generation
     treeBoxEmit(pageContext.root);
@@ -723,6 +733,7 @@ static const struct luaL_reg genhtmllib[] ={
   {"parent",genhtml_parent},
   {"children",genhtml_children},
   {"setpagewidth",genhtml_setpagewidth},
+	{"setpageheight",genhtml_setpageheight},
   {"boxheight",genhtml_boxheight},
   {NULL,NULL}
 };
