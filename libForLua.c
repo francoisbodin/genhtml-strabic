@@ -1,4 +1,3 @@
-
 #include <stdio.h>
 #include <sys/time.h>
 #include <string.h>
@@ -10,6 +9,8 @@
 #include <libxml/parser.h>
 #include <libxml/tree.h>
 #include <stdarg.h>
+#include <igraph.h>
+#include <math.h>
 
 //Some external
 extern char *itoa(int, char *, int);
@@ -23,8 +24,8 @@ extern char *itoa(int, char *, int);
 unsigned char outstr[MAX_BUFFERSIZE];
 
 #define STR_DEFAULTPOLICE "Arial, Verdana, sans-serif"
-#define STR_DEFAULTCOLOR "#ffffff"
-#define STR_DEFAULTBACKGROUNDCOLOR "rgb(100,100,100)"
+#define STR_DEFAULTCOLOR "#FFFFFF"
+#define STR_DEFAULTBACKGROUNDCOLOR "#FFFFFF"
 #define VAL_DEFAULTPOLICESIZE 12
 
 #define STR_RESOURCE "resource"
@@ -41,7 +42,7 @@ unsigned char outstr[MAX_BUFFERSIZE];
 #define STR_PROCESSING   "processing"
 #define POVRAY_CMD   "povray"
 #define POVRAY_PRF   "/tmp/scene"
-
+#define STR_NODE "node"
 
 // global flag for debug
 int notInLua = 0;
@@ -52,6 +53,7 @@ xmlNode *root_element_Content = NULL;
 int fileNameIncrement =0;
 //output file specification
 #define NOM_FICHIER_OUT "outfile.html"
+const char * outfile_name = NULL;
 FILE *outfile =NULL;
 //input file specification
 #define NOM_FICHIER_IN "infile.xml"
@@ -61,6 +63,145 @@ xmlDocPtr doc = NULL; //building the XML file tree for the infile
 #define NOM_FICHIER_RES "reshtml.xml"
 FILE *resfile =NULL;
 xmlDocPtr resdoc = NULL; 
+
+// Library GRAPHE
+typedef struct g_node{
+	int id;
+	char * name;
+	char * name_display;
+	float x;
+	float y;
+	float z;
+	char * stylename;
+} g_node;
+
+typedef struct g_edge{
+	int id;
+	g_node * source;
+	g_node * target;
+	float weight;
+} g_edge;
+
+g_node * nodes[100];
+g_edge * edges[1500];
+
+int nb_node = 0;
+int nb_edge = 0;
+int pos_edge = 0;
+
+// iGraphe
+igraph_t graphe;
+
+// new g_node
+g_node * newG_node(int id){
+  g_node * n = (g_node *) malloc(sizeof(g_node));
+  n->id = id;
+	n->name = NULL;
+	n->name_display=NULL;
+	n->x = 0;
+	n->y = 0;
+  n->z = 0;
+	n->stylename = NULL;
+  return n;
+}
+
+// new g_edge
+g_edge * newG_edge(int id){
+  g_edge * e = (g_edge *) malloc(sizeof(g_edge));
+  e->id = id;
+	e->source = NULL;
+	e->target = NULL;
+	e->weight = 0;
+
+  return e;
+}
+
+// get g_node by name
+g_node * getG_nodeByName(char * name){
+	int i;
+	for(i=0; i< nb_node ; i++){
+		g_node * cur = nodes[i];
+		if( !strcmp(cur->name,name) ) return cur;
+	}
+
+	return NULL;
+}
+
+// display all g_node
+void displayG_node(){
+	int i;
+	for(i=0; i< nb_node ; i++){
+		g_node * cur = nodes[i];
+		printf("Node[id=%d name=%s name_display=%s x=%0.2f y=%0.2f z=%0.2f]\n",cur->id,cur->name,cur->name_display,cur->x,cur->y,cur->z);
+	}
+}
+
+// display all g_edge
+void displayG_edge(){
+	int i;
+	for(i=0; i< nb_edge ; i++){
+		g_edge * cur = edges[i];
+		printf("Edge[id=%d source=%s target=%s weight=%0.2f]\n",cur->id,cur->source->name,cur->target->name,cur->weight);
+	}
+}
+
+// create array edges {1,2,1,3, etc}
+void createArrayEdges(igraph_real_t *tab){
+	int i;
+	int j=0;
+	for(i=0; i< nb_edge ; i++){
+		g_edge * cur = edges[i];
+		tab[j] = (igraph_real_t)cur->source->id;
+		tab[j+1] = (igraph_real_t)cur->target->id;
+		j = j+2;
+	}
+}	
+
+// generate coordinates
+void generateCoordinates(){
+	
+	// Matrice des coordonées
+	igraph_matrix_t m_coord;
+	igraph_matrix_init(&m_coord, 0, 0); 
+
+	// Paramètres de l'algorithme
+	igraph_integer_t niter = 500;
+	igraph_real_t sigma = nb_node / 4;
+	igraph_real_t initemp = 10;
+	igraph_real_t coolexp = 0.99;
+	igraph_real_t kkconst = nb_node * nb_node;
+	igraph_bool_t use_seed = 0;
+
+	// Vecteur coordonnées mini
+	igraph_vector_t min;
+	int i = 0;
+	igraph_real_t tabzero[nb_node];
+	for(i;i < nb_node;i++){
+		tabzero[i]=(igraph_real_t)0;
+	}
+
+	igraph_vector_init_copy(&min,tabzero,nb_node);
+
+	// Algorithme de kamada kawai
+	//igraph_layout_kamada_kawai(&graphe,&m_coord,niter,sigma,initemp,coolexp,kkconst,use_seed,&min,NULL,&min,NULL);
+	
+	igraph_real_t maxdelta = nb_node;
+	igraph_real_t area = 3000;
+	igraph_real_t repulserad = area * nb_node;
+
+	igraph_layout_fruchterman_reingold(&graphe,&m_coord,niter,maxdelta,area,coolexp,repulserad,FALSE,NULL,&min,NULL,&min,NULL);
+	
+	// Association des coordonées aux nodes
+	for(i=0;i<nb_node;i++){
+		g_node * cur = nodes[i];
+		cur->x = (float)((MATRIX(m_coord, i, 0)*50.0));
+		cur->y = (float)((MATRIX(m_coord, i, 1)*50.0));
+		cur->z = 10;
+
+		//printf("node %d: x=%0.2f y=%0.2f\n",i,MATRIX(m_coord, i, 0),MATRIX(m_coord,i,1));
+	}
+
+}
 
 //
 // My small tree library
@@ -139,6 +280,7 @@ treenode *linkNode(treenode *parent, treenode *child){
 
 void treeDisplay(treenode *n){
   if (!n) return;
+
   if (!n->parent) printf("node %i named %s\n", n->id,n->name);
   else printf("node %i named %s (parent %i) \n", n->id,n->name,n->parent->id);
   if (n->content) printf("\t CONTENT: %s\n",n->content);
@@ -182,7 +324,6 @@ treenode * getNodeWithId(treenode *n, int id){
   }
   return NULL;
 }
-
 
 
 int genhtml_parent(lua_State *L){
@@ -544,9 +685,16 @@ int genhtml_setpageheight(lua_State *L){
 }
 
 int genhtml_start(lua_State *L){
+	const char *out_name = luaL_checkstring(L,1);
+	if(out_name){
+		outfile_name = out_name;
+ 	}else{
+		outfile_name = NOM_FICHIER_OUT;
+	}
+
   printf("Opening output file\n");
   if (outfile == NULL){
-    outfile = fopen(NOM_FICHIER_OUT, "wb");
+    outfile = fopen(outfile_name, "wb");
     // start to add trees nodes
     xmlChar *epilogue = get_element_value(root_element_resHTML,STR_EPILOGUE);
     xmlChar *prologue = get_element_value(root_element_resHTML,STR_PROLOGUE);
@@ -556,7 +704,7 @@ int genhtml_start(lua_State *L){
     nodeSetContent(nepilogue,epilogue);
     treenode *nprologue = newNode(pageContext.root,STR_PROLOGUE);
     nodeSetContent(nprologue,prologue);
-    //treeDisplay(pageContext.root);
+    treeDisplay(pageContext.root);
   } else 
     printf("already started\n");
   return 0; 
@@ -566,7 +714,7 @@ int genhtml_start(lua_State *L){
 int genhtml_finish(lua_State *L){
   if (outfile != NULL){
     // We do not print HTM before the end... 
-    printf("Generating HTML file in %s\n",NOM_FICHIER_OUT);
+    printf("Generating HTML file in %s\n",outfile_name);
     //start to fill the HTML FILE
     // generate prologue
     // prologue has one parameter, the width of the screen in px
@@ -581,8 +729,13 @@ int genhtml_finish(lua_State *L){
 			snprintf(h, LEN, "%d", pageContext.sizeY);
       fprintf(outfile,"%s\n",insertParam(content,5,w,h,STR_DEFAULTPOLICE,STR_DEFAULTCOLOR,STR_DEFAULTBACKGROUNDCOLOR));
     }
+
     //body generation
     treeBoxEmit(pageContext.root);
+
+		// Graphe generation
+		generateGrapheView();
+		
     //generate epilogue
     treenode *nepilogue = getNodeWithName(pageContext.root,STR_EPILOGUE);
     if (!nepilogue) printf("Epilogue node not found\n");
@@ -593,6 +746,9 @@ int genhtml_finish(lua_State *L){
     printf("Closing output file\n");
     fclose(outfile);
     outfile = NULL;
+
+		// Destruction du graphe
+  	igraph_destroy(&graphe);
   }
   return 0; 
 }
@@ -707,6 +863,135 @@ int genhtml_boxheight(lua_State *L){
   return 1;
  }
 
+
+///////////// GRAPHE
+
+int genhtml_generateconstellation(lua_State *L){
+	const char *Filename = luaL_checkstring(L,1); // get the graphe file
+	xmlDoc *doc = NULL;
+	xmlNode *root_element = NULL; 
+  doc = xmlReadFile(Filename, NULL, 0);
+	
+	if (doc == NULL){
+		printf("error: could not parse file %s\n", Filename);
+  }else{
+	  root_element = xmlDocGetRootElement(doc);
+
+		// parse le gml, instancie les treenode, met à jour le vecteur edge
+ 		parseElement(root_element);
+		
+		displayG_node();
+		displayG_edge();
+		
+		// initialise le tableau d'arretes pour la création du graph
+		igraph_real_t array_edges[nb_edge*2];
+		createArrayEdges(array_edges);
+
+		igraph_vector_t v_edges;
+		igraph_vector_view(&v_edges,array_edges,nb_edge*2);
+		igraph_create(&graphe,&v_edges,nb_node,IGRAPH_UNDIRECTED);
+		
+		// generation des coordonées
+		generateCoordinates();
+
+		// génère graph html dans finish()
+
+    xmlFreeDoc(doc);
+  }
+
+  xmlCleanupParser();
+	return 0;
+}
+
+void parseElement(xmlNode * a_node){
+	xmlNode *cur_node = NULL;
+ 
+	for (cur_node = a_node; cur_node; cur_node = cur_node->next) {
+		if(cur_node->type == XML_ELEMENT_NODE){
+			
+			// NODE
+			if( !strcmp(cur_node->name,"node") ){
+
+				for(xmlAttrPtr attribute = cur_node->properties; attribute != NULL; attribute = attribute->next){
+					xmlChar* value = xmlNodeListGetString(cur_node->doc,attribute->children,1);	
+					if(	!strcmp(attribute->name,"id") ){			
+						g_node * n = newG_node(nb_node);
+						n->name = (char *)value;
+						n->stylename= "nodeStyle";
+						nodes[nb_node]=n;
+					}			
+				}
+				nb_node = nb_node + 1;
+     	}
+
+			// EDGE
+			if( !strcmp(cur_node->name,"edge") ){
+				g_edge * e = newG_edge(nb_edge);
+
+				for(xmlAttrPtr attribute = cur_node->properties; attribute != NULL; attribute = attribute->next){
+					xmlChar* value = xmlNodeListGetString(cur_node->doc,attribute->children,1);	
+					treenode * n = NULL;					
+					if(	!strcmp(attribute->name,"source") ){					
+						e->source = getG_nodeByName(value); 					
+					}
+
+					if(	!strcmp(attribute->name,"target") ){
+						e->target = getG_nodeByName(value); 					
+					}			
+				}
+
+				edges[nb_edge]= e;
+				nb_edge = nb_edge + 1;
+			}
+
+			// DATA
+			if( !strcmp(cur_node->name,"data")){
+				for(xmlAttrPtr attribute = cur_node->properties; attribute != NULL; attribute = attribute->next){
+					xmlChar* key = xmlNodeListGetString(cur_node->doc,attribute->children,1);
+					if( !strcmp(key,"name")){
+						xmlChar* value = xmlNodeListGetString(cur_node->doc,cur_node->children,1);
+						xmlChar* parent = xmlNodeListGetString(cur_node->doc,cur_node->parent->properties->children,1);
+						g_node * p = getG_nodeByName(parent);
+						p->name_display = value;
+					}
+				}	
+			}
+
+        parseElement(cur_node->children);
+    }
+	}
+}
+
+
+void generateGrapheView(){
+	int i;
+	// generation HTML nodes
+	for(i=0;i<nb_node;i++){
+		g_node * cur = nodes[i];
+		fprintf(outfile,"<div ");
+		fprintf(outfile,"class=\"%s\" ",cur->stylename);
+		fprintf(outfile,"style=\"position:absolute;left:%0.1fpx;top:%0.1fpx;z-index:%0.1f\">",cur->x,cur->y,cur->z);
+		fprintf(outfile,"%s",cur->name_display);
+		fprintf(outfile,"</div>\n");
+	}
+
+	// generation HTML edges
+  
+	/*fprintf(outfile,"<svg height=\"10000\" width=\"10000\">");
+	for(i=0;i<nb_edge;i++){
+		g_edge * cur = edges[i];
+		float x1 = (float)(cur->source->x +30);
+		float y1 = (float)(cur->source->y +30);
+		float x2 = (float)(cur->target->x +30);
+		float y2 = (float)(cur->target->y +30);
+	
+		fprintf(outfile,"<line x1=%0.2f y1=%0.2f x2=%0.2f y2=%0.2f stroke=\"white\" stroke-width=\"3\"/>",x1,y1,x2,y2);
+	} 
+	fprintf(outfile,"</svg>");*/
+}
+
+
+
 /////////// INITIALISATION TASK
 static const struct luaL_reg genhtmllib[] ={
   {"add1", genhtml_add1},
@@ -735,6 +1020,7 @@ static const struct luaL_reg genhtmllib[] ={
   {"setpagewidth",genhtml_setpagewidth},
 	{"setpageheight",genhtml_setpageheight},
   {"boxheight",genhtml_boxheight},
+	{"generateConstellation",genhtml_generateconstellation},
   {NULL,NULL}
 };
 
@@ -776,6 +1062,8 @@ int luaopen_genhtml(lua_State *L){
   pageContext.defaultPoliceColor = NULL;
   pageContext.defaultPoliceSize = VAL_DEFAULTPOLICESIZE;
   pageContext.root = newNode(NULL,STR_ROOTNAME);
+
   return 1;
 }
+
 
